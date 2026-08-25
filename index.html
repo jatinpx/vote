@@ -207,6 +207,11 @@ td.name-cell{min-width:190px;}
 }
 .adv-avatar:hover{border-color:var(--accent);}
 .adv-avatar img{width:100%; height:100%; object-fit:cover; display:block;}
+.adv-avatar.has-photo{cursor:zoom-in;}
+.photo-lightbox-overlay{background:rgba(6,9,12,0.86);}
+.photo-lightbox-img{max-width:min(92vw,640px); max-height:88vh; border-radius:10px; box-shadow:0 8px 40px rgba(0,0,0,0.5); display:block;}
+.photo-lightbox-close{position:absolute; top:16px; right:18px; background:rgba(255,255,255,0.12); color:#fff; border-color:rgba(255,255,255,0.35);}
+.photo-lightbox-close:hover{background:rgba(255,255,255,0.22);}
 .mob-link{color:var(--ink); text-decoration:none;}
 .mob-link:hover{color:var(--accent); text-decoration:underline;}
 .no-mob{color:var(--ink-faint);}
@@ -441,6 +446,11 @@ footer.appfoot{max-width:1180px; margin:0 auto; padding:0 24px 40px; color:var(-
 
 <input type="file" id="photoFileInput" accept="image/*" hidden>
 
+<div class="modal-overlay photo-lightbox-overlay" id="photoLightbox" hidden>
+  <button class="modal-close photo-lightbox-close" id="photoLightboxClose" aria-label="Close">&times;</button>
+  <img class="photo-lightbox-img" id="photoLightboxImg" alt="">
+</div>
+
 <div class="modal-overlay" id="notesOverlay" hidden>
   <div class="modal-box">
     <div class="modal-head">
@@ -575,17 +585,52 @@ function initials(name){
 function setAvatarEl(el, id, name){
   if (!el) return;
   el.innerHTML = `<span class="avatar-fallback">${esc(initials(name))}</span>`;
+  el.classList.remove('has-photo');
   if (avatarUrlCache.has(id)) {
     const url = avatarUrlCache.get(id);
-    if (url) el.innerHTML = `<img src="${url}" alt="">`;
+    if (url) { el.innerHTML = `<img src="${url}" alt="">`; el.classList.add('has-photo'); }
     return;
   }
   getPhotoBlob(id).then(blob => {
     if (!blob) { avatarUrlCache.set(id, null); return; }
     const url = URL.createObjectURL(blob);
     avatarUrlCache.set(id, url);
-    if (document.body.contains(el)) el.innerHTML = `<img src="${url}" alt="">`;
+    if (document.body.contains(el)) { el.innerHTML = `<img src="${url}" alt="">`; el.classList.add('has-photo'); }
   });
+}
+function openPhotoLightbox(id){
+  const cached = avatarUrlCache.get(id);
+  if (cached) {
+    document.getElementById('photoLightboxImg').src = cached;
+    document.getElementById('photoLightbox').hidden = false;
+    return;
+  }
+  getPhotoBlob(id).then(blob => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    avatarUrlCache.set(id, url);
+    document.getElementById('photoLightboxImg').src = url;
+    document.getElementById('photoLightbox').hidden = false;
+  });
+}
+function closePhotoLightbox(){
+  document.getElementById('photoLightbox').hidden = true;
+  document.getElementById('photoLightboxImg').src = '';
+}
+document.getElementById('photoLightboxClose').addEventListener('click', closePhotoLightbox);
+document.getElementById('photoLightbox').addEventListener('click', (e) => {
+  if (e.target.id === 'photoLightbox') closePhotoLightbox();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !document.getElementById('photoLightbox').hidden) closePhotoLightbox();
+});
+async function handleAvatarClick(id){
+  const cached = avatarUrlCache.get(id);
+  if (cached) { openPhotoLightbox(id); return; }
+  if (avatarUrlCache.has(id)) { requestPhotoUpload(id); return; } // cached as "no photo"
+  const blob = await getPhotoBlob(id);
+  if (blob) openPhotoLightbox(id);
+  else requestPhotoUpload(id);
 }
 function invalidateAvatarCache(id){
   const existing = avatarUrlCache.get(id);
@@ -880,7 +925,7 @@ function renderVillage(container, villageName){
       html += `<tr class="${flagClass} ${contactedClass}" data-id="${r.id}">
         <td class="sr-cell mono" data-label="#" style="color:var(--ink-faint)">${i+1}</td>
         <td class="enr-cell mono" data-label="Enrollment No." style="font-size:12.5px;">${esc(eff.enrollmentNo || '&mdash;')}</td>
-        <td class="name-cell" data-label="Advocate"><div class="name-cell-inner"><div class="adv-avatar" data-act="photo" data-id2="${r.id}" title="Click to add/change photo"></div><div class="name-row"><div><div class="adv-name">${esc(eff.name)}</div><div class="adv-relation">${esc(eff.relation)}</div></div><div class="name-actions"><button class="contact-btn ${rec.c==='y'?'yes':rec.c==='n'?'no':''}" data-act="contact" data-val="y" data-id2="${r.id}">${rec.c==='y'?'Yes':rec.c==='n'?'No':'&mdash;'}</button><button class="note-btn ${rec.n?'has-note':''}" data-act="notes" data-id2="${r.id}" title="${rec.n?'Edit note':'Add note'}">${noteIcon}<span class="note-dot"></span></button></div></div></div></td>
+        <td class="name-cell" data-label="Advocate"><div class="name-cell-inner"><div class="adv-avatar" data-act="photo" data-id2="${r.id}" title="Click to view photo, or add one"></div><div class="name-row"><div><div class="adv-name">${esc(eff.name)}</div><div class="adv-relation">${esc(eff.relation)}</div></div><div class="name-actions"><button class="contact-btn ${rec.c==='y'?'yes':rec.c==='n'?'no':''}" data-act="contact" data-val="y" data-id2="${r.id}">${rec.c==='y'?'Yes':rec.c==='n'?'No':'&mdash;'}</button><button class="note-btn ${rec.n?'has-note':''}" data-act="notes" data-id2="${r.id}" title="${rec.n?'Edit note':'Add note'}">${noteIcon}<span class="note-dot"></span></button></div></div></div></td>
         <td class="mono" data-label="Mobile">${eff.mobile ? `<a class="mob-link" href="tel:${esc(eff.mobile)}">${esc(eff.mobile)}</a>` : '<span class="no-mob">&mdash;</span>'}</td>
         ${isCity ? `<td class="loc-text" data-label="Locality">${esc(eff.locality)}</td>` : ''}
         <td class="stance-cell status-cell" data-label="Stance"><div class="stance-group">
@@ -897,7 +942,7 @@ function renderVillage(container, villageName){
   container.querySelectorAll('[data-act="photo"]').forEach(el => {
     const id = Number(el.dataset.id2);
     setAvatarEl(el, id, effRec(id).name);
-    el.addEventListener('click', () => requestPhotoUpload(id));
+    el.addEventListener('click', () => handleAvatarClick(id));
   });
   container.querySelectorAll('[data-act="contact"]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1234,6 +1279,9 @@ function refreshEditPhoto(){
     document.getElementById('editPhotoRemoveBtn').hidden = !blob;
   });
 }
+document.getElementById('editPhotoPreview').addEventListener('click', () => {
+  if (editOpenId != null) handleAvatarClick(editOpenId);
+});
 document.getElementById('editPhotoUploadBtn').addEventListener('click', () => {
   if (editOpenId != null) requestPhotoUpload(editOpenId);
 });
